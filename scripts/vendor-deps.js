@@ -11,7 +11,7 @@
 //   - sql.js:          https://github.com/sql-js/sql.js/releases (sql-wasm.js + sql-wasm.wasm)
 //   - transformers.js: https://github.com/xenova/transformers.js/releases (dist build)
 
-import { writeFile } from 'node:fs/promises';
+import { writeFile, appendFile } from 'node:fs/promises';
 
 const files = [
   {
@@ -36,5 +36,15 @@ for (const { url, out } of files) {
   await writeFile(out, buf);
   console.log(`  -> ${out} (${buf.length} bytes)`);
 }
+
+// sql.js ships a UMD build with no ESM export. Our MV3 background worker is a
+// `type: module` service worker and does `import initSqlJs from './sql-wasm.js'`,
+// which needs a real default export. Append one so the import resolves.
+const SQL_JS = 'extension/lib/sql-wasm.js';
+await appendFile(
+  SQL_JS,
+  '\n// --- Added by vendor-deps.js: expose ESM default export for MV3 module workers ---\nexport default initSqlJs;\n'
+);
+console.log(`Patched ${SQL_JS} with an ESM default export.`);
 
 console.log('Done. The MiniLM model itself downloads lazily on first use and is cached by the browser.');
