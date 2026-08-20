@@ -12,6 +12,12 @@ import { pipeline, env } from './transformers.min.js'; // vendored, see README
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
 
+// onnxruntime-web defaults to a multi-threaded WASM build that uses
+// Atomics.wait for cross-thread sync. Atomics.wait blocks the calling thread,
+// which is forbidden on a service worker's main thread ("Atomics.wait cannot be
+// called in this context"). Force the single-threaded backend to avoid it.
+env.backends.onnx.wasm.numThreads = 1;
+
 let extractorPromise = null;
 
 function getExtractor() {
