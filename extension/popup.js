@@ -1,56 +1,68 @@
-// popup.js
-const input = document.getElementById('search');
-const resultsEl = document.getElementById('results');
+// popup.js — AI-prompt interface over your browsing history (RAG).
+const input = document.getElementById('ask');
+const answerEl = document.getElementById('answer');
+const sourcesEl = document.getElementById('sources');
 
-let debounceTimer = null;
-
-input.addEventListener('input', () => {
-  clearTimeout(debounceTimer);
-  const query = input.value;
-  debounceTimer = setTimeout(() => runSearch(query), 250);
+document.getElementById('settings-link').addEventListener('click', () => {
+  chrome.runtime.openOptionsPage();
 });
 
-async function runSearch(query) {
-  if (!query.trim()) {
-    resultsEl.innerHTML = '<div class="empty">Start typing to search your browsing memory</div>';
-    return;
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    ask(input.value);
   }
+});
 
-  resultsEl.innerHTML = '<div class="empty">Searching…</div>';
+async function ask(query) {
+  if (!query.trim()) return;
+
+  answerEl.innerHTML = '<div class="empty">Thinking…</div>';
+  sourcesEl.innerHTML = '';
 
   let response;
   try {
-    response = await chrome.runtime.sendMessage({ type: 'SEARCH_QUERY', query });
+    response = await chrome.runtime.sendMessage({ type: 'ASK', query });
   } catch (err) {
-    resultsEl.innerHTML = `<div class="empty">Search error: ${escapeHtml(String(err && err.message || err))}</div>`;
+    showError(String(err && err.message || err));
     return;
   }
 
-  if (response?.error) {
-    resultsEl.innerHTML = `<div class="empty">Search error: ${escapeHtml(response.error)}</div>`;
+  if (!response || response.error) {
+    showError(response?.error || 'No response from the extension.');
     return;
   }
-  renderResults(response?.results || []);
+
+  renderAnswer(response.answer || '', response.sources || []);
 }
 
-function renderResults(results) {
-  if (!results.length) {
-    resultsEl.innerHTML = '<div class="empty">No matches yet</div>';
+function renderAnswer(answer, sources) {
+  answerEl.classList.remove('error');
+  answerEl.textContent = answer || 'No answer.';
+
+  if (!sources.length) {
+    sourcesEl.innerHTML = '';
     return;
   }
 
-  resultsEl.innerHTML = '';
-  for (const r of results) {
+  sourcesEl.innerHTML = '<div class="label">Sources</div>';
+  sources.forEach((s, i) => {
     const div = document.createElement('div');
-    div.className = 'result';
-    div.innerHTML = `
-      <div class="result-title">${escapeHtml(r.title || r.url)}</div>
-      <div class="result-meta">${new Date(r.capturedAt).toLocaleString()} · ${escapeHtml(new URL(r.url).hostname)}</div>
-      <div class="result-snippet">${escapeHtml(r.snippet)}…</div>
-    `;
-    div.addEventListener('click', () => chrome.tabs.create({ url: r.url }));
-    resultsEl.appendChild(div);
-  }
+    div.className = 'source';
+    let host = s.url;
+    try { host = new URL(s.url).hostname; } catch { /* keep raw url */ }
+    div.innerHTML =
+      `<span class="idx">[${i + 1}]</span>` +
+      `${escapeHtml(s.title || host)} <span class="host">· ${escapeHtml(host)}</span>`;
+    div.addEventListener('click', () => chrome.tabs.create({ url: s.url }));
+    sourcesEl.appendChild(div);
+  });
+}
+
+function showError(msg) {
+  answerEl.className = 'error';
+  answerEl.textContent = msg;
+  sourcesEl.innerHTML = '';
 }
 
 function escapeHtml(str) {

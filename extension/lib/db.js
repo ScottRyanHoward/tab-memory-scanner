@@ -94,6 +94,28 @@ export async function insertPage(record) {
   return id;
 }
 
+// Fetch full rows (including full text) for a specific set of ids. Used by the
+// RAG answer layer, which needs more than the short snippet held in the cache.
+// Order of the returned array is not guaranteed to match `ids`; callers that
+// care about ranking should reorder themselves.
+export async function getPagesByIds(ids) {
+  if (!ids || !ids.length) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  const res = db.exec(
+    `SELECT id, url, title, text, capturedAt FROM pages WHERE id IN (${placeholders})`,
+    ids
+  );
+  if (!res.length) return [];
+
+  return res[0].values.map(row => ({
+    id: row[0],
+    url: row[1],
+    title: row[2],
+    text: row[3],
+    capturedAt: row[4]
+  }));
+}
+
 export async function getAllPages() {
   const res = db.exec('SELECT id, url, title, text, referrer, capturedAt, vector FROM pages');
   if (!res.length) return [];

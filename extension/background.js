@@ -1,6 +1,7 @@
 // background.js (MV3 module service worker)
-import { initDB, insertPage, getAllPages } from './lib/db.js';
+import { initDB, insertPage, getAllPages, getPagesByIds } from './lib/db.js';
 import { embedText, cosineSimilarity } from './lib/embeddings.js';
+import { answerQuestion, DEFAULT_MODEL } from './lib/llm.js';
 
 let dbReady = initDB();
 
@@ -61,6 +62,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Always respond, otherwise the popup hangs on "Searching…" forever.
         console.error('[tab-memory] search failed', err);
         sendResponse({ results: [], error: String(err && err.message || err) });
+      });
+    return true;
+  }
+
+  if (message.type === 'ASK') {
+    handleAsk(message.query)
+      .then(sendResponse)
+      .catch(err => {
+        console.error('[tab-memory] ask failed', err);
+        sendResponse({ error: String(err && err.message || err) });
       });
     return true;
   }
@@ -155,5 +166,57 @@ async function handleSearch(query) {
 
   return {
     results: relevant.map(({ vector, ...rest }) => rest)
+  };
+}
+
+// --- RAG question answering ---------------------------------------------------
+// For answering we retrieve a small set of candidate pages with a LOOSER floor
+// than plain search (the LLM makes the final relevance call, and this improves
+// recall for broad queries like "car" -> a Subaru page), then let Claude
+// synthesize a grounded answer over their full text.
+const RAG_TOP_K = 6;
+const RAG_MIN_SCORE = 0.15;
+
+async function handleAsk(query) {
+  if (!query || !query.trim()) return { answer: '', sources: [] };
+
+  const { anthropicApiKey, anthropicModel } =
+    await chrome.storage.local.get(['anthropicApiKey', 'anthropicModel']);
+  if (!anthropicApiKey) {
+    return { error: 'No Anthropic API key set. Open Settings (the ⚙ link) and add your key.' };
+  }
+
+  await ensureCache();
+
+  if (!embeddingCache.length) {
+    return { answer: "Your browsing history is empty so far — visit a few pages (give each ~10 seconds) and try again.", sources: [] };
+  }
+
+  const searchText = normalizeQuery(query);
+  const queryVector = await embedText(searchText);
+
+  const scored = embeddingCache
+    .map(item => ({ ...item, score: cosineSimilarity(queryVector, item.vector) }))
+    .sort((a, b) => b.score - a.score);
+
+  console.log('[tab-memory] ask %o -> normalized %o; top scores:', query, searchText,
+    scored.slice(0, 8).map(s => ({ score: +s.score.toFixed(3), title: s.title })));
+
+  const top = scored.filter(s => s.score >= RAG_MIN_SCORE).slice(0, RAG_TOP_K);
+  if (!top.length) {
+    return { answer: "I couldn't find anything relevant in your browsing history for that.", sources: [] };
+  }
+
+  // Pull full text for the top candidates and restore ranking order.
+  const fetched = await getPagesByIds(top.map(t => t.id));
+  const byId = new Map(fetched.map(p => [p.id, p]));
+  const pages = top.map(t => byId.get(t.id)).filter(Boolean);
+
+  const model = anthropicModel || DEFAULT_MODEL;
+  const answer = await answerQuestion({ question: query, pages, apiKey: anthropicApiKey, model });
+
+  return {
+    answer,
+    sources: pages.map(p => ({ url: p.url, title: p.title, capturedAt: p.capturedAt }))
   };
 }

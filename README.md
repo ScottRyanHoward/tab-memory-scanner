@@ -1,7 +1,9 @@
 # Tab Memory
 
-Semantic search over everything you've browsed. Fully local — no cloud,
-no account, no data leaving your machine.
+Semantic search — and AI answers — over everything you've browsed. Capture,
+embedding, and search are fully local. An **optional** AI answer layer (ask a
+question, get a synthesized answer from your history) uses the Anthropic API;
+it's off until you add your own API key in Settings.
 
 ## How it works
 
@@ -88,11 +90,30 @@ icon (or open a new tab) and search.
 - **Private-browsing / domain exclusion list** — let users blocklist
   sensitive domains (banking, health) from ever being captured.
 
+## AI answers (optional)
+
+The popup works like an AI prompt: ask a question ("what was that page about
+car parts?") and it retrieves the most relevant pages from your history, then
+asks Claude to synthesize a grounded answer with citations.
+
+- Open **Settings** (⚙ in the popup) and paste your own Anthropic API key
+  (from console.anthropic.com). The key is stored in `chrome.storage.local`
+  on this machine only.
+- Pick a model — Opus 5 (best), Sonnet 5 (balanced), or Haiku 4.5
+  (fastest/cheapest for quick history questions).
+- **This is the one feature that sends data off-device:** when you ask a
+  question, the text of the matching pages is sent to the Anthropic API to
+  generate the answer. Clear the key to disable it. Everything else stays local.
+
 ## Privacy notes
 
-- All storage is local (IndexedDB). Nothing is uploaded anywhere.
-- The only network call is the one-time embedding model download from
-  Hugging Face's CDN via transformers.js; after that it's cached.
+- All storage is local (IndexedDB). Capture, embedding, and search never leave
+  your machine.
+- The embedding model downloads once from Hugging Face's CDN via
+  transformers.js, then is cached.
+- The AI answer layer (above) is the only feature that transmits page content,
+  and only to the Anthropic API, and only when you've added a key and asked a
+  question.
 - Worth adding early: a visible "paused" toggle and a domain exclusion
   list before wider use, since capturing page text by default is
   sensitive even when local-only.
