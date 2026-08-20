@@ -11,7 +11,7 @@
 //   - sql.js:          https://github.com/sql-js/sql.js/releases (sql-wasm.js + sql-wasm.wasm)
 //   - transformers.js: https://github.com/xenova/transformers.js/releases (dist build)
 
-import { writeFile, appendFile } from 'node:fs/promises';
+import { writeFile, readFile } from 'node:fs/promises';
 
 const files = [
   {
@@ -37,14 +37,24 @@ for (const { url, out } of files) {
   console.log(`  -> ${out} (${buf.length} bytes)`);
 }
 
-// sql.js ships a UMD build with no ESM export. Our MV3 background worker is a
-// `type: module` service worker and does `import initSqlJs from './sql-wasm.js'`,
-// which needs a real default export. Append one so the import resolves.
+// sql.js ships a UMD build meant to be loaded as a classic script. Our MV3
+// background worker is a `type: module` service worker that does
+// `import initSqlJs from './sql-wasm.js'`, so we have to make the UMD file a
+// valid ES module. Two edits are needed:
+//   1. Add a real default export so the import resolves.
+//   2. ES modules run in strict mode, where the bundle's bare
+//      `module = undefined;` assignment throws "module is not defined".
+//      Declaring it with `var` keeps sql.js's intent (module stays undefined so
+//      emscripten won't clobber the export) while being strict-mode safe.
 const SQL_JS = 'extension/lib/sql-wasm.js';
-await appendFile(
-  SQL_JS,
-  '\n// --- Added by vendor-deps.js: expose ESM default export for MV3 module workers ---\nexport default initSqlJs;\n'
-);
-console.log(`Patched ${SQL_JS} with an ESM default export.`);
+let sqlSrc = await readFile(SQL_JS, 'utf8');
+if (!sqlSrc.includes('var module = undefined;')) {
+  sqlSrc = sqlSrc.replace('module = undefined;', 'var module = undefined;');
+}
+if (!sqlSrc.includes('export default initSqlJs;')) {
+  sqlSrc += '\n// --- Added by vendor-deps.js: expose ESM default export for MV3 module workers ---\nexport default initSqlJs;\n';
+}
+await writeFile(SQL_JS, sqlSrc);
+console.log(`Patched ${SQL_JS} for ESM (default export + strict-mode-safe module).`);
 
 console.log('Done. The MiniLM model itself downloads lazily on first use and is cached by the browser.');
