@@ -94,11 +94,49 @@ async function handleCapture(payload) {
   });
 }
 
+// Relevance cutoff for search. Scores are cosine similarity of L2-normalized
+// MiniLM embeddings (roughly 0..1). Below this we treat a page as "not a match"
+// so weak/unrelated pages are dropped instead of padding out the results.
+// Tune against the "[tab-memory] top scores" logs if results feel too loose/tight.
+const MIN_SCORE = 0.3;
+const MAX_RESULTS = 20;
+
+// Conversational queries ("what was that page about car parts?") carry filler
+// words that dilute the embedding. Strip common question/stop words plus words
+// people use to refer to the browsing item itself ("page", "article", "saw"),
+// so the query vector focuses on the actual topic. Falls back to the raw query
+// if stripping would leave nothing.
+const QUERY_STOPWORDS = new Set([
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'it', 'its',
+  'i', 'me', 'my', 'we', 'our', 'you', 'your',
+  'what', 'whats', 'which', 'who', 'whom', 'where', 'when', 'why', 'how',
+  'was', 'were', 'is', 'are', 'am', 'be', 'been', 'being',
+  'do', 'did', 'does', 'done', 'have', 'has', 'had',
+  'of', 'on', 'in', 'to', 'for', 'from', 'about', 'with', 'at', 'by', 'as', 'into', 'over',
+  'and', 'or', 'but', 'if', 'so', 'than', 'then',
+  'page', 'pages', 'site', 'sites', 'website', 'websites', 'article', 'articles',
+  'link', 'links', 'tab', 'tabs', 'thing', 'things', 'something', 'someone',
+  'see', 'saw', 'seen', 'read', 'find', 'found', 'looking', 'look', 'viewed', 'visit', 'visited',
+  'again', 'around', 'some', 'any', 'there', 'here'
+]);
+
+function normalizeQuery(query) {
+  const cleaned = query
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ') // drop punctuation
+    .split(/\s+/)
+    .filter(w => w && !QUERY_STOPWORDS.has(w))
+    .join(' ')
+    .trim();
+  return cleaned || query.trim(); // fall back if we stripped everything
+}
+
 async function handleSearch(query) {
   if (!query || !query.trim()) return { results: [] };
   await ensureCache(); // ensure the cache is populated even on a cold wake
 
-  const queryVector = await embedText(query);
+  const searchText = normalizeQuery(query);
+  const queryVector = await embedText(searchText);
 
   const scored = embeddingCache.map(item => ({
     ...item,
@@ -107,7 +145,15 @@ async function handleSearch(query) {
 
   scored.sort((a, b) => b.score - a.score);
 
+  // Log the strongest scores so the MIN_SCORE threshold can be tuned to real data.
+  console.log('[tab-memory] query %o -> normalized %o; top scores:', query, searchText,
+    scored.slice(0, 8).map(s => ({ score: +s.score.toFixed(3), title: s.title })));
+
+  const relevant = scored
+    .filter(s => s.score >= MIN_SCORE)
+    .slice(0, MAX_RESULTS);
+
   return {
-    results: scored.slice(0, 20).map(({ vector, ...rest }) => rest)
+    results: relevant.map(({ vector, ...rest }) => rest)
   };
 }
