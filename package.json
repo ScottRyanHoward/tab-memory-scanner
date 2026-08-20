@@ -1,0 +1,11 @@
+{
+  "name": "tab-memory",
+  "version": "0.1.0",
+  "description": "Semantic search over your browsing history. Fully local, no cloud.",
+  "private": true,
+  "scripts": {
+    "vendor": "node scripts/vendor-deps.js",
+    "zip": "cd extension && zip -r ../tab-memory.zip . -x '*.DS_Store'"
+  },
+  "license": "MIT"
+}
