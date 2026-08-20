@@ -18,7 +18,18 @@ async function runSearch(query) {
 
   resultsEl.innerHTML = '<div class="empty">Searching…</div>';
 
-  const response = await chrome.runtime.sendMessage({ type: 'SEARCH_QUERY', query });
+  let response;
+  try {
+    response = await chrome.runtime.sendMessage({ type: 'SEARCH_QUERY', query });
+  } catch (err) {
+    resultsEl.innerHTML = `<div class="empty">Search error: ${escapeHtml(String(err && err.message || err))}</div>`;
+    return;
+  }
+
+  if (response?.error) {
+    resultsEl.innerHTML = `<div class="empty">Search error: ${escapeHtml(response.error)}</div>`;
+    return;
+  }
   renderResults(response?.results || []);
 }
 

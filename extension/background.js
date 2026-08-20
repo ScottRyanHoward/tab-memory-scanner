@@ -45,12 +45,23 @@ chrome.runtime.onStartup.addListener(() => { ensureCache(); });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PAGE_CAPTURE') {
-    handleCapture(message).then(() => sendResponse({ ok: true }));
+    handleCapture(message)
+      .then(() => sendResponse({ ok: true }))
+      .catch(err => {
+        console.error('[tab-memory] capture failed', err);
+        sendResponse({ ok: false, error: String(err && err.message || err) });
+      });
     return true; // keep channel open for async response
   }
 
   if (message.type === 'SEARCH_QUERY') {
-    handleSearch(message.query).then(sendResponse);
+    handleSearch(message.query)
+      .then(sendResponse)
+      .catch(err => {
+        // Always respond, otherwise the popup hangs on "Searching…" forever.
+        console.error('[tab-memory] search failed', err);
+        sendResponse({ results: [], error: String(err && err.message || err) });
+      });
     return true;
   }
 
