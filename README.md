@@ -111,11 +111,20 @@ Now type a question in the popup and press **Enter**, e.g.
 numbered citations linking to the source pages. See
 [AI answers](#ai-answers-optional) for the privacy tradeoff.
 
+Ask handles broad, conversational, and category questions — *"what did I look
+up about cars?"* will surface a Subaru page even though it never says the word
+"car." It pulls your closest-matching pages by meaning and lets Claude judge
+relevance, so you don't need the exact wording that appears on the page. (Plain
+**Search**, by contrast, is stricter and keyword-meaning based — use Ask when
+you want an answer rather than a list.)
+
 ### Troubleshooting
 
 - **"No Anthropic API key set"** — add your key in ⚙ Settings.
-- **Search returns nothing** — you may not have captured any pages yet, or the
-  query is too specific. Browse a few pages first and give each ~10 seconds.
+- **Search returns nothing** — plain Search is deliberately strict and drops
+  weak matches. If you know the page is there, try **Ask** instead (it's far
+  more forgiving with broad or category wording), or make sure you've actually
+  captured pages (browse a few and give each ~10 seconds).
 - **Model download / first search is slow** — the ~25 MB embedding model
   downloads once on first use; subsequent runs are fast.
 - **Re-vendoring** — if `extension/lib/` is missing files, re-run
