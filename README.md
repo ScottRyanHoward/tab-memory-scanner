@@ -1,14 +1,14 @@
 # Tab Memory
 
-Semantic search — and AI answers — over everything you've browsed. Capture,
-embedding, and search are fully local. An **optional** AI answer layer (ask a
-question, get a synthesized answer from your history) uses the Anthropic API;
-it's off until you add your own API key in Settings.
+Ask questions about everything you've browsed and get AI answers grounded in
+the pages you actually read. Your history is captured, embedded, and searched
+**locally**; answering the question uses the Anthropic API, so an API key is
+**required** — add your own in Settings after installing.
 
 ## How it works
 
 1. **Capture** — a content script watches each page. After you've spent
-   ~8 seconds on it (configurable), it extracts the readable text and
+   ~3 seconds on it (configurable), it extracts the readable text and
    sends it to the background service worker.
 2. **Embed** — the background worker runs the text through a small local
    embedding model (`Xenova/all-MiniLM-L6-v2` via transformers.js, ~25MB,
@@ -16,18 +16,17 @@ it's off until you add your own API key in Settings.
 3. **Store** — the page (URL, title, text, timestamp, referrer, vector)
    is saved into a SQLite database (via sql.js/WASM) that's persisted in
    IndexedDB, so it survives browser restarts.
-4. **Search** — typing a query in the popup embeds it the same way and ranks
-   stored pages by cosine similarity, so you can find "that article about
-   mitochondria" without remembering the title or URL.
-5. **Ask (optional)** — instead of just ranking pages, ask a real question
-   ("what was that page about car parts?"). The extension retrieves the most
-   relevant pages and sends them to Claude, which writes a grounded answer with
-   citations back to the source pages. This is the only feature that uses the
-   network beyond the model download, and only after you add your own API key.
+4. **Retrieve** — when you ask a question in the popup, it's embedded the same
+   way and the most semantically similar pages are ranked by cosine similarity.
+   This retrieval step is fully local.
+5. **Answer** — the top matching pages are sent to Claude (via the Anthropic
+   API), which writes a grounded answer with citations back to the source pages.
+   This is the only step that uses the network beyond the one-time model
+   download, and the reason an API key is required (see
+   [AI answers](#ai-answers)).
 
-Capture, embedding, storage, and search run entirely in-browser — no server,
-no account. The optional Ask feature is the sole exception (see
-[AI answers](#ai-answers-optional)).
+Capture, embedding, storage, and retrieval run entirely in-browser — no server,
+no account. Generating the answer is the sole exception.
 
 ## Project structure
 
@@ -36,8 +35,8 @@ tab-memory/
 ├── extension/
 │   ├── manifest.json       # MV3 manifest
 │   ├── content.js          # runs on every page, extracts + sends text
-│   ├── background.js       # service worker: capture, embed, search, ask
-│   ├── popup.html/.js      # search + ask popup
+│   ├── background.js       # service worker: capture, embed, retrieve, answer
+│   ├── popup.html/.js      # ask-a-question popup
 │   ├── options.html/.js    # settings: API key + model
 │   ├── icons/              # extension icons (16/48/128, included)
 │   └── lib/
@@ -82,23 +81,9 @@ the puzzle-piece icon and pin **Tab Memory**.)
 
 ## Using it
 
-### Build up some history
+### 1. Add your API key (required)
 
-Just browse. A content script captures the readable text of each page after you
-spend ~8 seconds on it. **The first capture triggers a one-time ~25 MB download
-of the embedding model** — after that everything is local and instant. Visit a
-handful of pages (give each ~10 seconds) so there's something to search.
-
-### Search (fully local)
-
-Click the extension icon and type a topic — e.g. `mitochondria` or
-`car parts`. Results are ranked by meaning, not keywords, so you don't need the
-exact title. Click a result to reopen the page. Weak matches are filtered out,
-so an off-topic query returns nothing rather than your whole history.
-
-### Ask (optional AI answers)
-
-To ask full questions and get synthesized answers, add your Anthropic API key:
+Answering questions uses Claude, so you need an Anthropic API key:
 
 1. Click the extension icon, then **⚙ Settings** (top-right of the popup).
 2. Paste your API key (create one at
@@ -106,27 +91,36 @@ To ask full questions and get synthesized answers, add your Anthropic API key:
 3. Choose a model — **Opus 5** (best), **Sonnet 5** (balanced), or
    **Haiku 4.5** (fastest/cheapest for quick questions) — and click **Save**.
 
-Now type a question in the popup and press **Enter**, e.g.
+The key is stored in `chrome.storage.local` on this machine only. Without it,
+the popup will tell you to add one.
+
+### 2. Build up some history
+
+Just browse. A content script captures the readable text of each page after you
+spend ~3 seconds on it. **The first capture triggers a one-time ~25 MB download
+of the embedding model** — after that everything is local and instant. Visit a
+handful of pages (give each a few seconds) so there's something to draw on.
+
+### 3. Ask
+
+Click the extension icon, type a question, and press **Enter**, e.g.
 *"what was that page about car parts?"* You'll get a written answer with
-numbered citations linking to the source pages. See
-[AI answers](#ai-answers-optional) for the privacy tradeoff.
+numbered citations linking to the source pages you can click to reopen.
 
 Ask handles broad, conversational, and category questions — *"what did I look
 up about cars?"* will surface a Subaru page even though it never says the word
 "car." It pulls your closest-matching pages by meaning and lets Claude judge
-relevance, so you don't need the exact wording that appears on the page. (Plain
-**Search**, by contrast, is stricter and keyword-meaning based — use Ask when
-you want an answer rather than a list.)
+relevance, so you don't need the exact wording that appears on the page.
 
 ### Troubleshooting
 
-- **"No Anthropic API key set"** — add your key in ⚙ Settings.
-- **Search returns nothing** — plain Search is deliberately strict and drops
-  weak matches. If you know the page is there, try **Ask** instead (it's far
-  more forgiving with broad or category wording), or make sure you've actually
-  captured pages (browse a few and give each ~10 seconds).
-- **Model download / first search is slow** — the ~25 MB embedding model
-  downloads once on first use; subsequent runs are fast.
+- **"No Anthropic API key set"** — add your key in ⚙ Settings (step 1 above).
+- **"I couldn't find anything relevant…"** — you may not have captured the page
+  yet. Make sure you actually spent a few seconds on it while browsing, then try
+  rephrasing the question.
+- **Model download / first answer is slow** — the ~25 MB embedding model
+  downloads once on first use; subsequent questions are fast (the Anthropic call
+  itself takes a moment, less so with Haiku).
 - **Re-vendoring** — if `extension/lib/` is missing files, re-run
   `node scripts/vendor-deps.js`.
 
@@ -134,11 +128,11 @@ you want an answer rather than a list.)
 
 - [x] Chrome MV3 extension, single browser for now
 - [x] Readable-text extraction (basic heuristic, not full Readability.js)
-- [x] Local embeddings, no network calls after first model download
+- [x] Local embeddings, no network calls for capture/retrieval after first
+      model download
 - [x] SQLite storage persisted via IndexedDB
-- [x] Semantic search in the popup (relevance-thresholded)
-- [x] Optional AI answers (RAG over your history via the Anthropic API,
-      bring-your-own-key)
+- [x] Local semantic retrieval (ranked by meaning) feeding the answer
+- [x] AI answers (RAG over your history via the Anthropic API, bring-your-own-key)
 
 ## Cut for v1 — roadmap
 
@@ -158,30 +152,31 @@ you want an answer rather than a list.)
 - **Private-browsing / domain exclusion list** — let users blocklist
   sensitive domains (banking, health) from ever being captured.
 
-## AI answers (optional)
+## AI answers
 
-The popup works like an AI prompt: ask a question ("what was that page about
-car parts?") and it retrieves the most relevant pages from your history, then
-asks Claude to synthesize a grounded answer with citations.
+The popup is an AI prompt: ask a question ("what was that page about car
+parts?") and it retrieves the most relevant pages from your history, then asks
+Claude to synthesize a grounded answer with citations.
 
 - Open **Settings** (⚙ in the popup) and paste your own Anthropic API key
   (from console.anthropic.com). The key is stored in `chrome.storage.local`
   on this machine only.
 - Pick a model — Opus 5 (best), Sonnet 5 (balanced), or Haiku 4.5
   (fastest/cheapest for quick history questions).
-- **This is the one feature that sends data off-device:** when you ask a
-  question, the text of the matching pages is sent to the Anthropic API to
-  generate the answer. Clear the key to disable it. Everything else stays local.
+- **Answering sends data off-device:** the text of the matching pages is sent
+  to the Anthropic API to generate the answer. This is required to use the
+  extension. Everything else — capture, embedding, storage, retrieval — stays
+  local.
 
 ## Privacy notes
 
-- All storage is local (IndexedDB). Capture, embedding, and search never leave
-  your machine.
+- All storage is local (IndexedDB). Capture, embedding, and retrieval never
+  leave your machine.
 - The embedding model downloads once from Hugging Face's CDN via
   transformers.js, then is cached.
-- The AI answer layer (above) is the only feature that transmits page content,
-  and only to the Anthropic API, and only when you've added a key and asked a
-  question.
+- Generating an answer is the only step that transmits page content, and only
+  to the Anthropic API — the text of the pages retrieved for your question is
+  sent on each ask.
 - Worth adding early: a visible "paused" toggle and a domain exclusion
   list before wider use, since capturing page text by default is
-  sensitive even when local-only.
+  sensitive even when stored locally.

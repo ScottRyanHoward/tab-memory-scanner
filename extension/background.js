@@ -5,14 +5,14 @@ import { answerQuestion, DEFAULT_MODEL } from './lib/llm.js';
 
 let dbReady = initDB();
 
-// Simple in-memory cache of embeddings for fast search without re-reading
-// the whole DB every keystroke.
+// Simple in-memory cache of embeddings for fast retrieval without re-reading
+// the whole DB on every question.
 let embeddingCache = []; // [{ id, url, title, capturedAt, snippet, vector }]
 
 // MV3 service workers are killed when idle and re-spawned by an incoming
 // message — and that wake fires NEITHER onInstalled NOR onStartup. So we
-// can't rely on those events to populate the cache; a search that wakes a
-// cold worker would otherwise run against an empty cache and return nothing.
+// can't rely on those events to populate the cache; a question that wakes a
+// cold worker would otherwise run against an empty cache and find nothing.
 // Instead build the cache lazily and single-flighted: the first handler to
 // need it kicks off the load, everyone else awaits the same promise.
 let cacheReadyPromise = null;
@@ -55,17 +55,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // keep channel open for async response
   }
 
-  if (message.type === 'SEARCH_QUERY') {
-    handleSearch(message.query)
-      .then(sendResponse)
-      .catch(err => {
-        // Always respond, otherwise the popup hangs on "Searching…" forever.
-        console.error('[tab-memory] search failed', err);
-        sendResponse({ results: [], error: String(err && err.message || err) });
-      });
-    return true;
-  }
-
   if (message.type === 'ASK') {
     handleAsk(message.query)
       .then(sendResponse)
@@ -105,13 +94,6 @@ async function handleCapture(payload) {
   });
 }
 
-// Relevance cutoff for search. Scores are cosine similarity of L2-normalized
-// MiniLM embeddings (roughly 0..1). Below this we treat a page as "not a match"
-// so weak/unrelated pages are dropped instead of padding out the results.
-// Tune against the "[tab-memory] top scores" logs if results feel too loose/tight.
-const MIN_SCORE = 0.3;
-const MAX_RESULTS = 20;
-
 // Conversational queries ("what was that page about car parts?") carry filler
 // words that dilute the embedding. Strip common question/stop words plus words
 // people use to refer to the browsing item itself ("page", "article", "saw"),
@@ -144,33 +126,6 @@ function normalizeQuery(query) {
   return cleaned || query.trim(); // fall back if we stripped everything
 }
 
-async function handleSearch(query) {
-  if (!query || !query.trim()) return { results: [] };
-  await ensureCache(); // ensure the cache is populated even on a cold wake
-
-  const searchText = normalizeQuery(query);
-  const queryVector = await embedText(searchText);
-
-  const scored = embeddingCache.map(item => ({
-    ...item,
-    score: cosineSimilarity(queryVector, item.vector)
-  }));
-
-  scored.sort((a, b) => b.score - a.score);
-
-  // Log the strongest scores so the MIN_SCORE threshold can be tuned to real data.
-  console.log('[tab-memory] query %o -> normalized %o; top scores:', query, searchText,
-    scored.slice(0, 8).map(s => ({ score: +s.score.toFixed(3), title: s.title })));
-
-  const relevant = scored
-    .filter(s => s.score >= MIN_SCORE)
-    .slice(0, MAX_RESULTS);
-
-  return {
-    results: relevant.map(({ vector, ...rest }) => rest)
-  };
-}
-
 // --- RAG question answering ---------------------------------------------------
 // For answering we rank all pages and take the top-K by RELATIVE similarity,
 // with only a tiny sanity floor to drop essentially-random matches. A hard
@@ -194,17 +149,17 @@ async function handleAsk(query) {
   await ensureCache();
 
   if (!embeddingCache.length) {
-    return { answer: "Your browsing history is empty so far — visit a few pages (give each ~10 seconds) and try again.", sources: [] };
+    return { answer: "Your browsing history is empty so far — visit a few pages (give each a few seconds) and try again.", sources: [] };
   }
 
-  const searchText = normalizeQuery(query);
-  const queryVector = await embedText(searchText);
+  const queryText = normalizeQuery(query);
+  const queryVector = await embedText(queryText);
 
   const scored = embeddingCache
     .map(item => ({ ...item, score: cosineSimilarity(queryVector, item.vector) }))
     .sort((a, b) => b.score - a.score);
 
-  console.log('[tab-memory] ask %o -> normalized %o; top scores:', query, searchText,
+  console.log('[tab-memory] ask %o -> normalized %o; top scores:', query, queryText,
     scored.slice(0, 8).map(s => ({ score: +s.score.toFixed(3), title: s.title })));
 
   const top = scored.filter(s => s.score >= RAG_MIN_SCORE).slice(0, RAG_TOP_K);

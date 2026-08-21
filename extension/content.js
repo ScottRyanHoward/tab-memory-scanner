@@ -3,7 +3,7 @@
 // (so we don't capture drive-by tabs), then extracts readable text and
 // sends it to the background service worker for storage + embedding.
 
-const MIN_DWELL_MS = 8000; // must be on page this long before we capture
+const MIN_DWELL_MS = 3000; // must be on page this long before we capture (filters drive-by tabs)
 const startTime = Date.now();
 
 let captured = false;
