@@ -16,12 +16,18 @@ it's off until you add your own API key in Settings.
 3. **Store** — the page (URL, title, text, timestamp, referrer, vector)
    is saved into a SQLite database (via sql.js/WASM) that's persisted in
    IndexedDB, so it survives browser restarts.
-4. **Search** — typing in the popup or new-tab page embeds your query the
-   same way and ranks stored pages by cosine similarity, so you can find
-   "that article about mitochondria" without remembering the title or URL.
+4. **Search** — typing a query in the popup embeds it the same way and ranks
+   stored pages by cosine similarity, so you can find "that article about
+   mitochondria" without remembering the title or URL.
+5. **Ask (optional)** — instead of just ranking pages, ask a real question
+   ("what was that page about car parts?"). The extension retrieves the most
+   relevant pages and sends them to Claude, which writes a grounded answer with
+   citations back to the source pages. This is the only feature that uses the
+   network beyond the model download, and only after you add your own API key.
 
-Everything runs in-browser. No server, no API keys, no network calls
-except the one-time model download.
+Capture, embedding, storage, and search run entirely in-browser — no server,
+no account. The optional Ask feature is the sole exception (see
+[AI answers](#ai-answers-optional)).
 
 ## Project structure
 
@@ -30,47 +36,100 @@ tab-memory/
 ├── extension/
 │   ├── manifest.json       # MV3 manifest
 │   ├── content.js          # runs on every page, extracts + sends text
-│   ├── background.js       # service worker: capture, embed, search
-│   ├── popup.html/.js      # quick search popup
-│   ├── newtab.html         # full-page search (reuses popup.js)
-│   ├── icons/              # extension icons (add your own 16/48/128 png)
+│   ├── background.js       # service worker: capture, embed, search, ask
+│   ├── popup.html/.js      # search + ask popup
+│   ├── options.html/.js    # settings: API key + model
+│   ├── icons/              # extension icons (16/48/128, included)
 │   └── lib/
 │       ├── db.js              # sql.js + IndexedDB persistence
 │       ├── embeddings.js      # transformers.js wrapper + cosine similarity
+│       ├── llm.js             # Anthropic Messages API call (AI answers)
 │       ├── sql-wasm.js        # vendored (run scripts/vendor-deps.js)
 │       ├── sql-wasm.wasm      # vendored
 │       └── transformers.min.js # vendored
 ├── scripts/
-│   └── vendor-deps.js      # downloads the two vendored libraries
+│   └── vendor-deps.js      # downloads + patches the vendored libraries
 ├── package.json
 └── README.md
 ```
 
-## Setup
+## Install
 
-```bash
-git clone <your-repo>
-cd tab-memory
-node scripts/vendor-deps.js   # downloads sql.js + transformers.js into extension/lib
-```
+**Requirements:** Google Chrome (or any Chromium browser) and Node.js (only to
+fetch the vendored libraries once).
 
-Then load it as an unpacked extension:
+1. **Get the code and vendor the libraries.** The WASM libraries (sql.js and
+   transformers.js) aren't committed — MV3 forbids loading remote code, so they
+   must live locally. Fetch them once:
 
-1. Open `chrome://extensions`
-2. Enable **Developer mode** (top right)
-3. Click **Load unpacked**
-4. Select the `extension/` folder
+   ```bash
+   git clone <your-repo>
+   cd tab-memory
+   node scripts/vendor-deps.js
+   ```
 
-Browse a few pages, wait ~10 seconds on each, then click the extension
-icon (or open a new tab) and search.
+   This downloads `sql-wasm.js`, `sql-wasm.wasm`, and `transformers.min.js` into
+   `extension/lib/` and patches sql.js so it loads as an ES module.
 
-## MVP scope (what's here)
+2. **Load the extension in Chrome.**
+   1. Open `chrome://extensions`
+   2. Enable **Developer mode** (top-right toggle)
+   3. Click **Load unpacked**
+   4. Select the `extension/` folder
+
+The extension icon should appear in your toolbar. (If you don't see it, click
+the puzzle-piece icon and pin **Tab Memory**.)
+
+## Using it
+
+### Build up some history
+
+Just browse. A content script captures the readable text of each page after you
+spend ~8 seconds on it. **The first capture triggers a one-time ~25 MB download
+of the embedding model** — after that everything is local and instant. Visit a
+handful of pages (give each ~10 seconds) so there's something to search.
+
+### Search (fully local)
+
+Click the extension icon and type a topic — e.g. `mitochondria` or
+`car parts`. Results are ranked by meaning, not keywords, so you don't need the
+exact title. Click a result to reopen the page. Weak matches are filtered out,
+so an off-topic query returns nothing rather than your whole history.
+
+### Ask (optional AI answers)
+
+To ask full questions and get synthesized answers, add your Anthropic API key:
+
+1. Click the extension icon, then **⚙ Settings** (top-right of the popup).
+2. Paste your API key (create one at
+   [console.anthropic.com](https://console.anthropic.com/settings/keys)).
+3. Choose a model — **Opus 5** (best), **Sonnet 5** (balanced), or
+   **Haiku 4.5** (fastest/cheapest for quick questions) — and click **Save**.
+
+Now type a question in the popup and press **Enter**, e.g.
+*"what was that page about car parts?"* You'll get a written answer with
+numbered citations linking to the source pages. See
+[AI answers](#ai-answers-optional) for the privacy tradeoff.
+
+### Troubleshooting
+
+- **"No Anthropic API key set"** — add your key in ⚙ Settings.
+- **Search returns nothing** — you may not have captured any pages yet, or the
+  query is too specific. Browse a few pages first and give each ~10 seconds.
+- **Model download / first search is slow** — the ~25 MB embedding model
+  downloads once on first use; subsequent runs are fast.
+- **Re-vendoring** — if `extension/lib/` is missing files, re-run
+  `node scripts/vendor-deps.js`.
+
+## What's here
 
 - [x] Chrome MV3 extension, single browser for now
 - [x] Readable-text extraction (basic heuristic, not full Readability.js)
 - [x] Local embeddings, no network calls after first model download
 - [x] SQLite storage persisted via IndexedDB
-- [x] Semantic search in popup + new-tab override
+- [x] Semantic search in the popup (relevance-thresholded)
+- [x] Optional AI answers (RAG over your history via the Anthropic API,
+      bring-your-own-key)
 
 ## Cut for v1 — roadmap
 

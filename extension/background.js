@@ -127,8 +127,10 @@ const QUERY_STOPWORDS = new Set([
   'and', 'or', 'but', 'if', 'so', 'than', 'then',
   'page', 'pages', 'site', 'sites', 'website', 'websites', 'article', 'articles',
   'link', 'links', 'tab', 'tabs', 'thing', 'things', 'something', 'someone',
-  'see', 'saw', 'seen', 'read', 'find', 'found', 'looking', 'look', 'viewed', 'visit', 'visited',
-  'again', 'around', 'some', 'any', 'there', 'here'
+  'see', 'saw', 'seen', 'read', 'find', 'found', 'looking', 'look', 'lookup', 'viewed', 'visit', 'visited',
+  'again', 'around', 'some', 'any', 'there', 'here',
+  // phrasal-verb particles ("look up", "find out") that survive removing the verb
+  'up', 'out', 'off'
 ]);
 
 function normalizeQuery(query) {
@@ -170,12 +172,15 @@ async function handleSearch(query) {
 }
 
 // --- RAG question answering ---------------------------------------------------
-// For answering we retrieve a small set of candidate pages with a LOOSER floor
-// than plain search (the LLM makes the final relevance call, and this improves
-// recall for broad queries like "car" -> a Subaru page), then let Claude
-// synthesize a grounded answer over their full text.
-const RAG_TOP_K = 6;
-const RAG_MIN_SCORE = 0.15;
+// For answering we rank all pages and take the top-K by RELATIVE similarity,
+// with only a tiny sanity floor to drop essentially-random matches. A hard
+// relevance threshold hurts recall for category words: a query like "cars"
+// may never literally appear on a Subaru page, so its absolute score is low
+// even though it's clearly the best match. Ranking + a low floor keeps it, and
+// Claude makes the final relevance call (its prompt says to admit when nothing
+// fits), so weak-but-correct matches still get answered.
+const RAG_TOP_K = 8;
+const RAG_MIN_SCORE = 0.05;
 
 async function handleAsk(query) {
   if (!query || !query.trim()) return { answer: '', sources: [] };
