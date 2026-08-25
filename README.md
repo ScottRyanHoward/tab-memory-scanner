@@ -1,15 +1,15 @@
 # Tab Memory
 
 Ask questions about everything you've browsed and get AI answers grounded in
-the pages you actually read. Your history is captured, embedded, and searched
+the pages you actually read. Your history is captured, embedded, and retrieved
 **locally**; answering the question uses the Anthropic API, so an API key is
 **required** — add your own in Settings after installing.
 
 ## How it works
 
 1. **Capture** — a content script watches each page. After you've spent
-   ~3 seconds on it (configurable), it extracts the readable text and
-   sends it to the background service worker.
+   ~3 seconds on it, it extracts the readable text and sends it to the
+   background service worker.
 2. **Embed** — the background worker runs the text through a small local
    embedding model (`Xenova/all-MiniLM-L6-v2` via transformers.js, ~25MB,
    downloaded once and cached by the browser) to get a semantic vector.
@@ -98,7 +98,7 @@ the popup will tell you to add one.
 
 Just browse. A content script captures the readable text of each page after you
 spend ~3 seconds on it. **The first capture triggers a one-time ~25 MB download
-of the embedding model** — after that everything is local and instant. Visit a
+of the embedding model** — after that everything runs locally and fast. Visit a
 handful of pages (give each a few seconds) so there's something to draw on.
 
 ### 3. Ask
@@ -133,24 +133,6 @@ relevance, so you don't need the exact wording that appears on the page.
 - [x] SQLite storage persisted via IndexedDB
 - [x] Local semantic retrieval (ranked by meaning) feeding the answer
 - [x] AI answers (RAG over your history via the Anthropic API, bring-your-own-key)
-
-## Cut for v1 — roadmap
-
-- **Better extraction** — swap the heuristic for a real Readability.js
-  port for cleaner text on messy sites.
-- **Cross-device sync** — optional, opt-in sync via a file the user
-  controls (e.g. a folder synced by Dropbox/Syncthing), keeping the
-  "you control your data" principle.
-- **"Why you opened it" capture** — prompt/allow a quick note on tab
-  close, and capture tab lineage (opener → child tabs) for context.
-- **Tab tree visualization** — see your browsing sessions as a graph,
-  not just a flat search list.
-- **Firefox support** — MV3 support in Firefox is closeby; mostly a
-  manifest tweak once the Chrome version is solid.
-- **Vector index at scale** — swap the naive in-memory cosine scan for
-  something like `hnswlib-wasm` once you have tens of thousands of pages.
-- **Private-browsing / domain exclusion list** — let users blocklist
-  sensitive domains (banking, health) from ever being captured.
 
 ## AI answers
 
