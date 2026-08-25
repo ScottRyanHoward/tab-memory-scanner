@@ -43,32 +43,27 @@ tab-memory-scanner/
 │       ├── db.js              # sql.js + IndexedDB persistence
 │       ├── embeddings.js      # transformers.js wrapper + cosine similarity
 │       ├── llm.js             # Anthropic Messages API call (AI answers)
-│       ├── sql-wasm.js        # vendored (run scripts/vendor-deps.js)
-│       ├── sql-wasm.wasm      # vendored
-│       └── transformers.min.js # vendored
+│       ├── sql-wasm.js        # vendored + committed (regen: vendor-deps.js)
+│       ├── sql-wasm.wasm      # vendored + committed
+│       └── transformers.min.js # vendored + committed
 ├── scripts/
-│   └── vendor-deps.js      # downloads + patches the vendored libraries
+│   └── vendor-deps.js      # maintainer tool: re-fetch + patch the vendored libs
 ├── package.json
 └── README.md
 ```
 
 ## Install
 
-**Requirements:** Google Chrome (or any Chromium browser) and Node.js (only to
-fetch the vendored libraries once).
+**Requirements:** Google Chrome (or any Chromium browser). No build step and no
+Node.js needed — the WASM libraries are committed to the repo, so you just get
+the files and load them.
 
-1. **Get the code and vendor the libraries.** The WASM libraries (sql.js and
-   transformers.js) aren't committed — MV3 forbids loading remote code, so they
-   must live locally. Fetch them once:
+1. **Get the code.** Clone the repo (or download the ZIP from GitHub via
+   **Code → Download ZIP** and unzip it):
 
    ```bash
    git clone https://github.com/ScottRyanHoward/tab-memory-scanner.git
-   cd tab-memory-scanner
-   node scripts/vendor-deps.js
    ```
-
-   This downloads `sql-wasm.js`, `sql-wasm.wasm`, and `transformers.min.js` into
-   `extension/lib/` and patches sql.js so it loads as an ES module.
 
 2. **Load the extension in Chrome.**
    1. Open `chrome://extensions`
@@ -78,6 +73,11 @@ fetch the vendored libraries once).
 
 The extension icon should appear in your toolbar. (If you don't see it, click
 the puzzle-piece icon and pin **Tab Memory**.)
+
+> **Maintainers:** the libraries in `extension/lib/` are pre-vendored and
+> committed. To refresh them, run `node scripts/vendor-deps.js`, which re-fetches
+> sql.js and transformers.js and re-applies the ES-module patch. End users don't
+> need this.
 
 ## Using it
 
