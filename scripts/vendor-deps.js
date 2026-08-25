@@ -1,31 +1,49 @@
 // scripts/vendor-deps.js
 //
-// MV3 extensions can't fetch code from a CDN at runtime (violates the
-// remote-code policy), so sql.js and transformers.js need to be vendored
-// as local files inside extension/lib/. Run this once after cloning:
+// Vendors EVERYTHING the extension needs at runtime so nothing is downloaded
+// from a third party on first use — the extension is fully self-contained and
+// the only network call it ever makes is the Anthropic answer request.
 //
 //   node scripts/vendor-deps.js
 //
-// It just fetches the built browser bundles and writes them locally.
-// If your network blocks npm/unpkg, download these manually instead:
-//   - sql.js:          https://github.com/sql-js/sql.js/releases (sql-wasm.js + sql-wasm.wasm)
-//   - transformers.js: https://github.com/xenova/transformers.js/releases (dist build)
+// What it fetches:
+//   - sql.js (SQLite/WASM)               -> extension/lib/
+//   - transformers.js (embeddings lib)   -> extension/lib/
+//   - onnxruntime-web WASM backend       -> extension/lib/ort/
+//   - the MiniLM embedding model         -> extension/models/Xenova/all-MiniLM-L6-v2/
+//
+// MV3 forbids loading remote *code*, and we additionally don't want any remote
+// *downloads* at runtime, so all of the above live inside the extension. The
+// model + runtime are large (~42MB) but committed, so end users just load the
+// unpacked extension — no build step, no first-run downloads.
 
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile, readFile, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
+
+const TF_VERSION = '2.17.2';
+const ORT_BASE = `https://cdn.jsdelivr.net/npm/@xenova/transformers@${TF_VERSION}/dist/`;
+const MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
+const HF_BASE = `https://huggingface.co/${MODEL_ID}/resolve/main/`;
+const MODEL_DIR = `extension/models/${MODEL_ID}`;
 
 const files = [
-  {
-    url: 'https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js',
-    out: 'extension/lib/sql-wasm.js'
-  },
-  {
-    url: 'https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.wasm',
-    out: 'extension/lib/sql-wasm.wasm'
-  },
-  {
-    url: 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js',
-    out: 'extension/lib/transformers.min.js'
-  }
+  // Core libraries
+  { url: 'https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js', out: 'extension/lib/sql-wasm.js' },
+  { url: 'https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.wasm', out: 'extension/lib/sql-wasm.wasm' },
+  { url: `${ORT_BASE}transformers.min.js`, out: 'extension/lib/transformers.min.js' },
+
+  // onnxruntime-web WASM backend (single-threaded SIMD + non-SIMD fallback).
+  // We run onnx with numThreads=1, so the threaded builds are never requested.
+  { url: `${ORT_BASE}ort-wasm-simd.wasm`, out: 'extension/lib/ort/ort-wasm-simd.wasm' },
+  { url: `${ORT_BASE}ort-wasm.wasm`, out: 'extension/lib/ort/ort-wasm.wasm' },
+
+  // MiniLM model files (quantized ONNX + tokenizer/config). Loaded locally so
+  // the first embedding does not hit HuggingFace.
+  { url: `${HF_BASE}config.json`, out: `${MODEL_DIR}/config.json` },
+  { url: `${HF_BASE}tokenizer.json`, out: `${MODEL_DIR}/tokenizer.json` },
+  { url: `${HF_BASE}tokenizer_config.json`, out: `${MODEL_DIR}/tokenizer_config.json` },
+  { url: `${HF_BASE}special_tokens_map.json`, out: `${MODEL_DIR}/special_tokens_map.json` },
+  { url: `${HF_BASE}onnx/model_quantized.onnx`, out: `${MODEL_DIR}/onnx/model_quantized.onnx` }
 ];
 
 for (const { url, out } of files) {
@@ -33,6 +51,7 @@ for (const { url, out } of files) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
+  await mkdir(dirname(out), { recursive: true });
   await writeFile(out, buf);
   console.log(`  -> ${out} (${buf.length} bytes)`);
 }
@@ -57,4 +76,4 @@ if (!sqlSrc.includes('export default initSqlJs;')) {
 await writeFile(SQL_JS, sqlSrc);
 console.log(`Patched ${SQL_JS} for ESM (default export + strict-mode-safe module).`);
 
-console.log('Done. The MiniLM model itself downloads lazily on first use and is cached by the browser.');
+console.log('Done. The extension is fully self-contained — no runtime downloads.');

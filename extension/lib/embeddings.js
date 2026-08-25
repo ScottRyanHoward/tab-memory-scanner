@@ -1,16 +1,21 @@
 // lib/embeddings.js
-// Generates text embeddings fully on-device using transformers.js with a
-// small MiniLM model (~25MB, cached after first download). Nothing is
-// sent to any server — this is the whole point of the project.
+// Generates text embeddings fully on-device using transformers.js with a small
+// MiniLM model. The model weights AND the onnxruntime-web WASM backend are
+// vendored inside the extension (see scripts/vendor-deps.js), so embedding
+// never touches the network — no HuggingFace, no jsDelivr, nothing.
 
 import { pipeline, env } from './transformers.min.js'; // vendored, see README
 
-// We vendor transformers.js but NOT the model weights, and MV3's CSP won't let
-// us load remote *code*. Model files are data (fetched, not eval'd), so remote
-// model loading is fine — but make sure transformers doesn't waste time probing
-// for local model files inside the extension (which would 404).
-env.allowLocalModels = false;
-env.allowRemoteModels = true;
+const MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
+
+// Load everything from files packaged in the extension. Setting
+// allowRemoteModels=false means a failed local load errors instead of silently
+// falling back to a network fetch — so if anything is misconfigured, it fails
+// loudly rather than phoning home.
+env.allowRemoteModels = false;                                        // never fetch from HuggingFace
+env.allowLocalModels = true;
+env.localModelPath = chrome.runtime.getURL('models/');               // -> models/Xenova/all-MiniLM-L6-v2/...
+env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('lib/ort/'); // local onnxruntime-web binaries
 
 // onnxruntime-web defaults to a multi-threaded WASM build that uses
 // Atomics.wait for cross-thread sync. Atomics.wait blocks the calling thread,
@@ -22,12 +27,11 @@ let extractorPromise = null;
 
 function getExtractor() {
   if (!extractorPromise) {
-    console.log('[tab-memory] loading embedding model (first use downloads ~25MB)…');
-    extractorPromise = pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+    console.log('[tab-memory] loading local embedding model…');
+    extractorPromise = pipeline('feature-extraction', MODEL_ID, {
+      quantized: true, // load onnx/model_quantized.onnx (the vendored weights)
       progress_callback: (p) => {
-        if (p && p.status === 'progress' && p.file) {
-          console.log(`[tab-memory] model ${p.file}: ${Math.round(p.progress || 0)}%`);
-        } else if (p && p.status) {
+        if (p && p.status) {
           console.log(`[tab-memory] model ${p.status}${p.file ? ' ' + p.file : ''}`);
         }
       }

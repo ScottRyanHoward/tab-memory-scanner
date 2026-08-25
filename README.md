@@ -10,9 +10,10 @@ the pages you actually read. Your history is captured, embedded, and retrieved
 1. **Capture** — a content script watches each page. After you've spent
    ~3 seconds on it, it extracts the readable text and sends it to the
    background service worker.
-2. **Embed** — the background worker runs the text through a small local
-   embedding model (`Xenova/all-MiniLM-L6-v2` via transformers.js, ~25MB,
-   downloaded once and cached by the browser) to get a semantic vector.
+2. **Embed** — the background worker runs the text through a small embedding
+   model (`Xenova/all-MiniLM-L6-v2` via transformers.js) to get a semantic
+   vector. The model weights and the ONNX runtime are bundled in the extension,
+   so this never touches the network.
 3. **Store** — the page (URL, title, text, timestamp, referrer, vector)
    is saved into a SQLite database (via sql.js/WASM) that's persisted in
    IndexedDB, so it survives browser restarts.
@@ -21,12 +22,13 @@ the pages you actually read. Your history is captured, embedded, and retrieved
    This retrieval step is fully local.
 5. **Answer** — the top matching pages are sent to Claude (via the Anthropic
    API), which writes a grounded answer with citations back to the source pages.
-   This is the only step that uses the network beyond the one-time model
-   download, and the reason an API key is required (see
-   [AI answers](#ai-answers)).
+   This is the **only** step that uses the network at all, and the reason an API
+   key is required (see [AI answers](#ai-answers)).
 
 Capture, embedding, storage, and retrieval run entirely in-browser — no server,
-no account. Generating the answer is the sole exception.
+no account, no third-party downloads. Generating the answer is the sole network
+call the extension ever makes; it's even enforced by the extension's Content
+Security Policy, which only permits connections to `api.anthropic.com`.
 
 ## Project structure
 
@@ -39,15 +41,17 @@ tab-memory-scanner/
 │   ├── popup.html/.js      # ask-a-question popup
 │   ├── options.html/.js    # settings: API key + model
 │   ├── icons/              # extension icons (16/48/128, included)
+│   ├── models/            # MiniLM model files, bundled (Xenova/all-MiniLM-L6-v2)
 │   └── lib/
 │       ├── db.js              # sql.js + IndexedDB persistence
 │       ├── embeddings.js      # transformers.js wrapper + cosine similarity
 │       ├── llm.js             # Anthropic Messages API call (AI answers)
+│       ├── ort/               # onnxruntime-web WASM backend, bundled
 │       ├── sql-wasm.js        # vendored + committed (regen: vendor-deps.js)
 │       ├── sql-wasm.wasm      # vendored + committed
 │       └── transformers.min.js # vendored + committed
 ├── scripts/
-│   └── vendor-deps.js      # maintainer tool: re-fetch + patch the vendored libs
+│   └── vendor-deps.js      # maintainer tool: re-fetch libs + runtime + model
 ├── package.json
 └── README.md
 ```
@@ -55,8 +59,9 @@ tab-memory-scanner/
 ## Install
 
 **Requirements:** Google Chrome (or any Chromium browser). No build step and no
-Node.js needed — the WASM libraries are committed to the repo, so you just get
-the files and load them.
+Node.js needed — everything the extension runs (libraries, the ONNX runtime, and
+the embedding model) is committed to the repo (~45 MB), so you just get the files
+and load them. Nothing is downloaded on first use.
 
 1. **Get the code.** Clone the repo (or download the ZIP from GitHub via
    **Code → Download ZIP** and unzip it):
@@ -74,10 +79,11 @@ the files and load them.
 The extension icon should appear in your toolbar. (If you don't see it, click
 the puzzle-piece icon and pin **Tab Memory**.)
 
-> **Maintainers:** the libraries in `extension/lib/` are pre-vendored and
-> committed. To refresh them, run `node scripts/vendor-deps.js`, which re-fetches
-> sql.js and transformers.js and re-applies the ES-module patch. End users don't
-> need this.
+> **Maintainers:** the libraries, ONNX runtime, and model under `extension/` are
+> pre-vendored and committed. To refresh them, run `node scripts/vendor-deps.js`,
+> which re-fetches sql.js, transformers.js, the onnxruntime-web WASM, and the
+> MiniLM model, and re-applies the sql.js ES-module patch. End users don't need
+> this.
 
 ## Using it
 
@@ -97,9 +103,9 @@ the popup will tell you to add one.
 ### 2. Build up some history
 
 Just browse. A content script captures the readable text of each page after you
-spend ~3 seconds on it. **The first capture triggers a one-time ~25 MB download
-of the embedding model** — after that everything runs locally and fast. Visit a
-handful of pages (give each a few seconds) so there's something to draw on.
+spend ~3 seconds on it, then embeds it locally (the model is bundled — no
+download). Visit a handful of pages (give each a few seconds) so there's
+something to draw on.
 
 ### 3. Ask
 
@@ -118,21 +124,22 @@ relevance, so you don't need the exact wording that appears on the page.
 - **"I couldn't find anything relevant…"** — you may not have captured the page
   yet. Make sure you actually spent a few seconds on it while browsing, then try
   rephrasing the question.
-- **Model download / first answer is slow** — the ~25 MB embedding model
-  downloads once on first use; subsequent questions are fast (the Anthropic call
-  itself takes a moment, less so with Haiku).
-- **Re-vendoring** — if `extension/lib/` is missing files, re-run
-  `node scripts/vendor-deps.js`.
+- **First answer is a little slow** — the bundled model loads into memory on the
+  first embed of a session; after that it's fast. The Anthropic call itself takes
+  a moment (less so with Haiku).
+- **Re-vendoring** — if files under `extension/lib/` or `extension/models/` are
+  missing, re-run `node scripts/vendor-deps.js`.
 
 ## What's here
 
 - [x] Chrome MV3 extension, single browser for now
 - [x] Readable-text extraction (basic heuristic, not full Readability.js)
-- [x] Local embeddings, no network calls for capture/retrieval after first
-      model download
+- [x] Fully local embeddings — model + ONNX runtime bundled, zero runtime
+      downloads
 - [x] SQLite storage persisted via IndexedDB
 - [x] Local semantic retrieval (ranked by meaning) feeding the answer
 - [x] AI answers (RAG over your history via the Anthropic API, bring-your-own-key)
+- [x] CSP locked to `api.anthropic.com` — no other network egress is possible
 
 ## AI answers
 
@@ -154,11 +161,15 @@ Claude to synthesize a grounded answer with citations.
 
 - All storage is local (IndexedDB). Capture, embedding, and retrieval never
   leave your machine.
-- The embedding model downloads once from Hugging Face's CDN via
-  transformers.js, then is cached.
-- Generating an answer is the only step that transmits page content, and only
-  to the Anthropic API — the text of the pages retrieved for your question is
-  sent on each ask.
+- The embedding model and its ONNX runtime are bundled in the extension, so —
+  unlike a typical transformers.js setup — nothing is fetched from Hugging Face
+  or a CDN, ever, not even on first use.
+- Generating an answer is the only step that transmits data, and only to the
+  Anthropic API — the text of the pages retrieved for your question is sent on
+  each ask. This is enforced, not just intended: the extension's Content
+  Security Policy (`connect-src 'self' https://api.anthropic.com`) blocks the
+  extension from connecting anywhere else, so if a future change tried to phone
+  home it would fail rather than leak.
 - Worth adding early: a visible "paused" toggle and a domain exclusion
   list before wider use, since capturing page text by default is
   sensitive even when stored locally.
