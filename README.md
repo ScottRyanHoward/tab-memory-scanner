@@ -31,7 +31,7 @@ no account. Generating the answer is the sole exception.
 ## Project structure
 
 ```
-tab-memory/
+tab-memory-scanner/
 ├── extension/
 │   ├── manifest.json       # MV3 manifest
 │   ├── content.js          # runs on every page, extracts + sends text
@@ -62,8 +62,8 @@ fetch the vendored libraries once).
    must live locally. Fetch them once:
 
    ```bash
-   git clone <your-repo>
-   cd tab-memory
+   git clone https://github.com/ScottRyanHoward/tab-memory-scanner.git
+   cd tab-memory-scanner
    node scripts/vendor-deps.js
    ```
 
